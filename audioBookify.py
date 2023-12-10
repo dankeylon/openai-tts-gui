@@ -3,6 +3,7 @@
 Created on Thu Nov  9 16:19:04 2023
 
 @author: Daniel
+
 """
 import math
 import time
@@ -53,18 +54,7 @@ class Book():
             
             
         return chunks
-    
-    def sample_book(self):
-        
-        pass
-    
-    def shrink_chunk_to_last_sentence(self):
-        
-        pass
-    
-    def calc_num_tokens(self):
-        
-        pass
+
     
 class TTS_API_Wrapper():
     
@@ -124,6 +114,10 @@ class TTS_API_Wrapper():
         audiobook_chunks = self.spawn_requests()
         mp3_path_list = self.write_mp3s(audiobook_chunks)
         self.join_mp3s(mp3_path_list)
+
+    def create_sample(self):
+
+        pass
         
 
 
