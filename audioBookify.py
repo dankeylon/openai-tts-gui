@@ -8,6 +8,8 @@ Created on Thu Nov  9 16:19:04 2023
 import math
 import time
 
+import joblib as jb
+
 from dotenv import load_dotenv
 from pathlib import Path
 from openai import OpenAI
@@ -84,17 +86,22 @@ class TTS_API_Wrapper():
             
         return total_cost
     
-    def create_paths_to_mp3s(self, len_of_chunks_list):
+    def create_paths_to_mp3s(self, len_of_chunks_list, sample = False):
+        # TODO: Make paths relative to self.out_path
+        if sample == True:
+            sample_text = 'sample'
+        else:
+            sample_text = ''
 
         if len_chunks_list > 1:
             paths = [Path(__file__).parent / 
                     "mp3s" /
-                    (self.book.name + f"_{self.voice}_{self.model}_{idx}_of_{len_of_chunks_list}.mp3")
+                    (self.book.name + f"_{self.voice}_{self.model}_{idx}_of_{len_of_chunks_list}_{sample_text}.mp3")
                     for idx in range(0, len_of_chunks_list)]
         elif len_chunks_list == 1: 
             paths = [Path(__file__).parent / 
                     "mp3s" /
-                    (self.book.name + f"_{self.voice}_{self.model}.mp3")
+                    (self.book.name + f"_{self.voice}_{self.model}_{sample_text}.mp3")
                     for idx in range(0, len_of_chunks_list)]
 
         return paths
@@ -105,11 +112,16 @@ class TTS_API_Wrapper():
                                           voice=self.voice,
                                           input=chunk)
     
-    def spawn_requests(self):
+    def spawn_requests(self, chunks, paths_to_mp3s):
         
+        # Don't make requests if a expected file already exists and in overwrite_protect mode
+        request = [False if self.overwrite_protect and path.exists() else True
+                    for path in paths_to_mp3s]
+
         # Integrate joblib here, also find a way to rate limit the requests
-        if len(self.book.chunks) < self.max_requests_per_min:
-            responses = [self.request(chunk) for chunk in self.book.chunks]
+        if len(chunks) < self.max_requests_per_min:
+            responses = [self.request(chunk) if request[idx] else 0 
+                         for idx, chunk in enumerate(chunks)]
         
         return responses
     
@@ -121,8 +133,7 @@ class TTS_API_Wrapper():
             if not (overwrite_protect and paths_to_mp3s[idx].exists()):
                 chunk.stream_to_file(paths_to_mp3s[idx])
 
-
-    def join_mp3s(self, mp3_path_list):
+    def join_mp3s(self, mp3_path_list, overwrite_protect = True):
         # Use pydub to join the .mp3 chunks created by write_mp3s
         mp3_list = [AudioSegment.from_mp3(file) for file in mp3_path_list]
         output_file = mp3_list[0]
@@ -130,18 +141,31 @@ class TTS_API_Wrapper():
             output_file = output_file + file
         
         # Export the full audiobook to a .mp3 file
-        output_file.export(Path(__file__).parent / "mp3s" / (name + f"_{self.voice}_{self.model}.mp3"), format="mp3")
+        out_path = self.create_paths_to_mp3s(1)
+        if not (overwrite_protect and out_path.exists()):
+            output_file.export(out_path, format="mp3")
     
     def create_audiobook(self):
-        # Look into joining the mp3s before they are written to a file
-        audiobook_chunks = self.spawn_requests()
-        mp3_path_list = self.write_mp3s(audiobook_chunks, self.overwrite_protect)
-        if len(mp3_path_list) > 1:
-            self.join_mp3s(mp3_path_list)
+        # TODO: Look into joining the mp3s before they are written to a file, saves on hard drive space
 
-    def create_sample(self):
+        # Predetermine the paths of output files in case overwrite_protect is True
+        paths_to_mp3s = self.create_paths_to_mp3s(len(self.book.chunks))
 
-        pass
+        # Send the chunks to OpenAI for processing, write responses to mp3s
+        audio_chunks = self.spawn_requests(self.book.chunks, paths_to_mp3s)
+        self.write_mp3s(audio_chunks, paths_to_mp3s, self.overwrite_protect)
+
+        # If more than 1 mp3 was created, will need to join the mp3s into a single file
+        if len(paths_to_mp3s) > 1:
+            self.join_mp3s(paths_to_mp3s, self.overwrite_protect)
+
+    def create_sample(self, chunk_selection = 1, sample_size = 1000):
+
+        chunk = [self.book.chunks[chunk_selection][0:sample_size]]
+        path_to_sample = self.create_paths_to_mp3s(len(chunk), sample = True)
+        audio_chunk = self.spawn_requests(chunk, path_to_sample)
+        self.write_mp3s(audio_chunk, path_to_sample, self.overwrite_protect)
+
         
 
 
