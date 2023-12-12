@@ -161,9 +161,13 @@ class TTS_API_Wrapper():
 
     def create_sample(self, chunk_selection = 1, sample_size = 1000):
 
-        chunk = [self.book.chunks[chunk_selection][0:sample_size]]
-        path_to_sample = self.create_paths_to_mp3s(len(chunk), sample = True)
-        audio_chunk = self.spawn_requests(chunk, path_to_sample)
+        chunk_selection = max(min(chunk_selection, len(self.book.chunks)), 0)
+        chunk = self.book.chunks[chunk_selection]
+        sample_size = max(min(sample_size, len(chunk)), 5)
+        sample = [chunk[0:sample_size]]
+
+        path_to_sample = self.create_paths_to_mp3s(1, sample = True)
+        audio_chunk = self.spawn_requests(sample, path_to_sample)
         self.write_mp3s(audio_chunk, path_to_sample, self.overwrite_protect)
 
         
