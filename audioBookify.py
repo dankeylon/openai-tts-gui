@@ -87,19 +87,19 @@ class TTS_API_Wrapper():
         return total_cost
     
     def create_paths_to_mp3s(self, len_of_chunks_list, sample = False):
-        # TODO: Make paths relative to self.out_path
+        # TODO: Make paths relative to self.out_path #Path(__file__).parent
         if sample == True:
             sample_text = 'sample'
         else:
             sample_text = ''
 
         if len_chunks_list > 1:
-            paths = [Path(__file__).parent / 
+            paths = [self.out_path / 
                     "mp3s" /
                     (self.book.name + f"_{self.voice}_{self.model}_{idx}_of_{len_of_chunks_list}_{sample_text}.mp3")
                     for idx in range(0, len_of_chunks_list)]
         elif len_chunks_list == 1: 
-            paths = [Path(__file__).parent / 
+            paths = [self.out_path / 
                     "mp3s" /
                     (self.book.name + f"_{self.voice}_{self.model}_{sample_text}.mp3")
                     for idx in range(0, len_of_chunks_list)]
@@ -170,8 +170,6 @@ class TTS_API_Wrapper():
         audio_chunk = self.spawn_requests(sample, path_to_sample)
         self.write_mp3s(audio_chunk, path_to_sample, self.overwrite_protect)
 
-        
-
 
 if __name__ == "__main__":
     voice = "nova"
@@ -182,34 +180,3 @@ if __name__ == "__main__":
     print(f"Num Chunks: {len(book.chunks)}")
     print(f"Num Chars: {len(book.book_text)}")
     
-    
-    idx = 0
-    speech_files = []
-    for chunk in book.chunks:
-        
-        print(chunk)
-
-        if len(book.chunks) == 1:
-            speech_file_path = Path(__file__).parent / "mp3s" / (name + f"_{voice}.mp3")
-        else: 
-            speech_file_path = Path(__file__).parent / "mp3s" / (name + f"_{voice}_{idx}.mp3")
-        
-        if not speech_file_path.exists(): # Try not to bleed me dry on api charges
-            response = client.audio.speech.create(
-              model="tts-1",
-              voice=voice,
-              input=chunk
-            )
-            
-            response.stream_to_file(speech_file_path)
-        
-        idx = idx + 1
-        speech_files.append(speech_file_path)
-    
-    if len(book.chunks) > 1:
-        mp3_list = [AudioSegment.from_mp3(file) for file in speech_files]
-        output_file = mp3_list[0]
-        for file in mp3_list[1:]:
-            output_file = output_file + file
-            
-        output_file.export(Path(__file__).parent / "mp3s" / (name + f"_{voice}.mp3"), format="mp3")
