@@ -152,12 +152,12 @@ class TTS_API_Wrapper():
         """
         # Create a list of paths to store .mp3s at.
         # If more than one path is required, order them
-        if len_chunks_list > 1:
+        if len_of_chunks_list > 1:
             paths = [self.out_path / 
                     "mp3s" /
                     (self.book.name + f"_{self.voice}_{self.model}_{idx}_of_{len_of_chunks_list}_{tag}.mp3")
                     for idx in range(0, len_of_chunks_list)]
-        elif len_chunks_list == 1: 
+        elif len_of_chunks_list == 1: 
             paths = [self.out_path / 
                     "mp3s" /
                     (self.book.name + f"_{self.voice}_{self.model}_{tag}.mp3")
@@ -165,7 +165,7 @@ class TTS_API_Wrapper():
 
         return paths
 
-    def request(self, chunk: str) -> HttpxBinaryResponseContent: # TODO: Does this actually work? Or should I just leave the return type blank?
+    def request(self, chunk: str): # TODO:  -> HttpxBinaryResponseContent Does this actually work? Or should I just leave the return type blank?
         """Sends a request to the OpenAI api using settings defined in initialization.
 
         Inputs
