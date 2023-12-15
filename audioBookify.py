@@ -22,9 +22,9 @@ class Book():
     to the OpenAI TTS api.
     """
     
-    disclaimer = "Note: This audio recording was generated using an AI voice provided by Open-AI. \n"
+    disclaimer = "Note: This audio recording was generated using an AI voice provided by OpenAI. \n"
     
-    def __init__(self, path_to_book: Path, chunk_size: int = 4096):
+    def __init__(self, path_to_book: Path, chunk_size: int = 4096) -> None:
         """Object instantiation.
 
         Inputs
@@ -47,7 +47,7 @@ class Book():
 
         self.chunks = self.chunk_book(self.book_text, chunk_size)
         
-    def chunk_book(self, book_text: str, chunk_size: int) -> list:
+    def chunk_book(self, book_text: str, chunk_size: int) -> list[str]:
         """Create a sequence of appropriately sized text chunks
 
         OpenAIs TTS api requires requests to contain less than an
@@ -105,7 +105,7 @@ class TTS_API_Wrapper():
                 out_path: Path,
                 model: str = "tts-1",
                 voice: str = "onyx",
-                overwrite_protect: bool = True):
+                overwrite_protect: bool = True) -> None:
         """Object instantiation.  Class requires the existence of a .env file with
         an api key inside.
         
@@ -137,7 +137,7 @@ class TTS_API_Wrapper():
             
         return total_cost
     
-    def create_paths_to_mp3s(self, len_of_chunks_list: int, tag: str = '') -> list:
+    def create_paths_to_mp3s(self, len_of_chunks_list: int, tag: str = '') -> list[Path]:
         """Creates a list of Path objects that store the locations of potential .mp3
         files.  Since OpenAI limits the number of characters in each request, multiple
         .mp3 files will need to be generated for large text files.
@@ -180,7 +180,7 @@ class TTS_API_Wrapper():
                                           voice=self.voice,
                                           input=chunk)
     
-    def spawn_requests(self, chunks: list, paths_to_mp3s: list, overwrite_protect: bool = True) -> list:
+    def spawn_requests(self, chunks: list[str], paths_to_mp3s: list[Path], overwrite_protect: bool = True) -> list:
         """Manages multiple requests to api such that user time is efficiently used and
         the api usage limits are not exceeded.
 
@@ -209,7 +209,7 @@ class TTS_API_Wrapper():
         
         return responses
     
-    def write_mp3s(self, audio_chunks: list, paths_to_mp3s: list, overwrite_protect: bool = True):
+    def write_mp3s(self, audio_chunks: list, paths_to_mp3s: list[Path], overwrite_protect: bool = True) -> None:
         # TODO: Should this be merged into spawn_requests? Could simplify code.
         """Writes the binary audio responses to mp3 files while ensuring existing .mp3s are
         protected if desired.
@@ -230,7 +230,7 @@ class TTS_API_Wrapper():
                 # TODO: A chunk might be zero, probably will be filtered out by the if statement
                 chunk.stream_to_file(paths_to_mp3s[idx])
 
-    def join_mp3s(self, mp3_path_list: list, overwrite_protect: bool = True):
+    def join_mp3s(self, mp3_path_list: list[Path], overwrite_protect: bool = True) -> None:
         """Uses pydub to join the .mp3 chunks created by write_mp3s into a single mp3 file.
 
         Inputs
@@ -251,13 +251,16 @@ class TTS_API_Wrapper():
         if not (overwrite_protect and out_path.exists()):
             output_file.export(out_path, format="mp3")
     
-    def create_audiobook(self):
+    def create_audiobook(self) -> None:
         """Takes the book text provided at initialization and the provided settings and 
         converts it into an audiobook.
         
         """
 
         # TODO: Look into joining the mp3s before they are written to a file, saves on hard drive space
+        # Using the AudioSegment __init__ method passing in data=audio_chunk.response.content(), might be able to merge before making files
+        # see: httpx/httpx/_models.py::Response
+        # openai-python/src/openai/_base_client.py::HttpxBinaryResponseContent
 
         # Predetermine the paths of output files in case overwrite_protect is True
         paths_to_mp3s = self.create_paths_to_mp3s(len(self.book.chunks))
