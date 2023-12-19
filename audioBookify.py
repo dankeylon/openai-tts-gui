@@ -203,10 +203,29 @@ class TTS_API_Wrapper():
                     for path in paths_to_mp3s]
 
         # TODO: Integrate joblib here, also find a way to rate limit the requests
-        if len(chunks) < self.max_requests_per_min:
-            responses = [self.request(chunk) if request[idx] else 0 
-                         for idx, chunk in enumerate(chunks)]
+        #if len(chunks) < self.max_requests_per_min:
+        #    responses = [self.request(chunk) if request[idx] else 0 
+        #                 for idx, chunk in enumerate(chunks)]
         
+        # Once every 60 seconds, send out a maximum of self.max_requests_per_min requests to OpenAI
+        # Can maybe accomplish this using async instead of joblib...
+        responses = []
+        start_time = time.perf_counter()
+        num_requests_sent_this_minute = 0
+        for idx, chunk in enumerate(chunks):
+            current_time = time.perf_counter()
+            elapsed_time = current_time - start_time
+            if elapsed_time < 60.0 and num_requests_sent_this_minute >= self.max_requests_per_min:
+                time.sleep(60.0 - elapsed_time + 1)
+                start_time = time.perf_counter()
+                num_requests_sent_this_minute = 0 
+            elif elapsed_time < 60.0 and num_requests_sent_this_minute < self.max_requests_per_min:
+                responses.append(self.request(chunk) if request[idx] else 0)
+                num_requests_sent_this_minute += 1
+            elif elapsed_time > 60.0 and num_requests_sent_this_minute >= self.max_requests_per_min:
+                pass
+
+
         return responses
     
     def write_mp3s(self, audio_chunks: list, paths_to_mp3s: list[Path], overwrite_protect: bool = True) -> None:
