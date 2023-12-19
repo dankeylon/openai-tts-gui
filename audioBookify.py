@@ -5,6 +5,8 @@ Created on Thu Nov  9 16:19:04 2023
 @author: Daniel
 
 """
+# TODO: What happens if you give the api a chunk that is larger than 4096 characters?
+# TODO: What happens if you exceed the per-minute api request limits?
 import math
 import time
 import asyncio
@@ -208,7 +210,7 @@ class TTS_API_Wrapper():
             for chunk, request_flag in zip(chunks, request_flags):
                 current_time = time.perf_counter()
                 elapsed_time = current_time - start_time
-                
+
                 # Limit requests per minute
                 if elapsed_time < 60.0 and num_requests_sent_this_minute >= self.max_requests_per_min:
                     # Hit api per minute usage limits, wait until one minute has passed since start_time
@@ -316,6 +318,7 @@ class TTS_API_Wrapper():
 
 
 if __name__ == "__main__":
+    # Early testing code
     voice = "nova"
     name = "My_Immortal_Ch1-10"
     path_to_book = Path(__file__).parent / "books" / (name+".txt")
@@ -323,4 +326,15 @@ if __name__ == "__main__":
     book = Book(path_to_book, 4096)
     print(f"Num Chunks: {len(book.chunks)}")
     print(f"Num Chars: {len(book.book_text)}")
+    print(f"Num Tokens: {int(len(book.book_text)/1000) + 1}")
+
+    out_path = Path(__file__).parent / "mp3s"
+    api = TTS_API_Wrapper(book, out_path, model = "tts-1", voice = voice, overwrite_protect = True)
+    print(f"Estimated Cost: {api.estimate_cost()}$")
+
+    go = input("Make audiobook? [y/n]")
+
+    if go == 'y':
+        asyncio.run(api.create_audiobook())
+
     
