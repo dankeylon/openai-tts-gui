@@ -7,15 +7,13 @@ Created on Thu Nov  9 16:19:04 2023
 """
 import math
 import time
-
-import joblib as jb
+import asyncio
+import aiohttp
 
 from dotenv import load_dotenv
 from pathlib import Path
 from openai import OpenAI
 from pydub import AudioSegment
-
-client = OpenAI()
 
 class Book():
     """Object to store a .txt file in a format amenable to sending
@@ -121,6 +119,8 @@ class TTS_API_Wrapper():
         self.overwrite_protect = overwrite_protect
         # TODO: Should overwrite_protect be an argument to methods or use the class attribute?
 
+        self.client = OpenAI()
+
     def estimate_cost(self) -> float:        
         """Calculates a cost estimate for using the TTS api to generate an audiobook
         using the provided settings.
@@ -165,7 +165,7 @@ class TTS_API_Wrapper():
 
         return paths
 
-    def request(self, chunk: str): # TODO:  -> HttpxBinaryResponseContent Does this actually work? Or should I just leave the return type blank?
+    async def request(self, chunk: str) -> HttpxBinaryResponseContent: # TODO:   Does this actually work? Or should I just leave the return type blank?
         """Sends a request to the OpenAI api using settings defined in initialization.
 
         Inputs
@@ -176,11 +176,9 @@ class TTS_API_Wrapper():
 
         """
 
-        return client.audio.speech.create(model=self.model,
-                                          voice=self.voice,
-                                          input=chunk)
+        return self.client.audio.speech.create(model=self.model, voice=self.voice, input=chunk)
     
-    def spawn_requests(self, chunks: list[str], paths_to_mp3s: list[Path], overwrite_protect: bool = True) -> list:
+    async def spawn_requests(self, chunks: list[str], paths_to_mp3s: list[Path], overwrite_protect: bool = True) -> list:
         """Manages multiple requests to api such that user time is efficiently used and
         the api usage limits are not exceeded.
 
@@ -199,35 +197,32 @@ class TTS_API_Wrapper():
         """
         
         # Don't make requests if a expected file already exists and in overwrite_protect mode
-        request = [False if overwrite_protect and path.exists() else True
-                    for path in paths_to_mp3s]
+        request_flags = [not (overwrite_protect and path.exists()) for path in paths_to_mp3s]
 
-        # TODO: Integrate joblib here, also find a way to rate limit the requests
-        #if len(chunks) < self.max_requests_per_min:
-        #    responses = [self.request(chunk) if request[idx] else 0 
-        #                 for idx, chunk in enumerate(chunks)]
-        
         # Once every 60 seconds, send out a maximum of self.max_requests_per_min requests to OpenAI
-        # Can maybe accomplish this using async instead of joblib...
-        responses = [0 for chunk in chunks]
-        start_time = time.perf_counter()
-        num_requests_sent_this_minute = 0
-        for idx, chunk in enumerate(chunks):
-            current_time = time.perf_counter()
-            elapsed_time = current_time - start_time
-            # Limit requests per minute
-            if elapsed_time < 60.0 and num_requests_sent_this_minute >= self.max_requests_per_min:
-                # Hit api per minute usage limits, wait until one minute has passed since start_time
-                time.sleep(60.0 - elapsed_time + 5)
-                start_time = time.perf_counter()
-                num_requests_sent_this_minute = 0 
-            elif elapsed_time >= 60.0:
-                # If elapsed_time exceeds 60s, reset the time count and request count
-                start_time = time.perf_counter()
-                num_requests_sent_this_minute = 0
+        async with aiohttp.ClientSession() as session:
+            responses = [0 for chunk in chunks]
+            start_time = time.perf_counter()
+            num_requests_sent_this_minute = 0
 
-            responses[idx] = self.request(chunk) if request[idx] else 0
-            num_requests_sent_this_minute += 1
+            for chunk, request_flag in zip(chunks, request_flags):
+                current_time = time.perf_counter()
+                elapsed_time = current_time - start_time
+                
+                # Limit requests per minute
+                if elapsed_time < 60.0 and num_requests_sent_this_minute >= self.max_requests_per_min:
+                    # Hit api per minute usage limits, wait until one minute has passed since start_time
+                    time.sleep(60.0 - elapsed_time + 5)
+                    start_time = time.perf_counter()
+                    num_requests_sent_this_minute = 0 
+                elif elapsed_time >= 60.0:
+                    # If elapsed_time exceeds 60s, reset the time count and request count
+                    start_time = time.perf_counter()
+                    num_requests_sent_this_minute = 0
+
+                if request_flag:
+                    responses[idx] = await self.request(chunk)
+                    num_requests_sent_this_minute += 1
 
         return responses
     
