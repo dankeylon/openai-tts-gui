@@ -209,22 +209,32 @@ class TTS_API_Wrapper():
         
         # Once every 60 seconds, send out a maximum of self.max_requests_per_min requests to OpenAI
         # Can maybe accomplish this using async instead of joblib...
-        responses = []
+        responses = [0 for chunk in chunks]
         start_time = time.perf_counter()
         num_requests_sent_this_minute = 0
         for idx, chunk in enumerate(chunks):
             current_time = time.perf_counter()
             elapsed_time = current_time - start_time
+            # Limit requests per minute
             if elapsed_time < 60.0 and num_requests_sent_this_minute >= self.max_requests_per_min:
+                # Hit api per minute usage limits, wait until one minute has passed since start_time
                 time.sleep(60.0 - elapsed_time + 1)
                 start_time = time.perf_counter()
                 num_requests_sent_this_minute = 0 
             elif elapsed_time < 60.0 and num_requests_sent_this_minute < self.max_requests_per_min:
-                responses.append(self.request(chunk) if request[idx] else 0)
-                num_requests_sent_this_minute += 1
+                # api usage within limits, do nothing, then request next chunk
+                pass
             elif elapsed_time > 60.0 and num_requests_sent_this_minute >= self.max_requests_per_min:
+                # Somehow, we've exceeded a minute while trying to send api requests, sleep for a bit then reset
+                time.sleep(30.0)
+                start_time = time.perf_counter()
+                num_requests_sent_this_minute = 0
+            elif elapsed_time > 60.0 and num_requests_sent_this_minute < self.max_requests_per_min:
+                # Somehow, a minute has passed and we haven't made all requests we can
                 pass
 
+            responses[idx] = self.request(chunk) if request[idx] else 0
+            num_requests_sent_this_minute += 1
 
         return responses
     
