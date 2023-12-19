@@ -221,17 +221,10 @@ class TTS_API_Wrapper():
                 time.sleep(60.0 - elapsed_time + 1)
                 start_time = time.perf_counter()
                 num_requests_sent_this_minute = 0 
-            elif elapsed_time < 60.0 and num_requests_sent_this_minute < self.max_requests_per_min:
-                # api usage within limits, do nothing, then request next chunk
-                pass
-            elif elapsed_time > 60.0 and num_requests_sent_this_minute >= self.max_requests_per_min:
-                # Somehow, we've exceeded a minute while trying to send api requests, sleep for a bit then reset
-                time.sleep(30.0)
-                start_time = time.perf_counter()
-                num_requests_sent_this_minute = 0
-            elif elapsed_time > 60.0 and num_requests_sent_this_minute < self.max_requests_per_min:
-                # Somehow, a minute has passed and we haven't made all requests we can
-                pass
+            elif elapsed_time >= 60.0 and num_requests_sent_this_minute >= self.max_requests_per_min:
+                # 
+                start_time += 60.0
+                num_requests_sent_this_minute -= self.max_requests_per_min
 
             responses[idx] = self.request(chunk) if request[idx] else 0
             num_requests_sent_this_minute += 1
