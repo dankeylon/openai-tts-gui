@@ -218,13 +218,13 @@ class TTS_API_Wrapper():
             # Limit requests per minute
             if elapsed_time < 60.0 and num_requests_sent_this_minute >= self.max_requests_per_min:
                 # Hit api per minute usage limits, wait until one minute has passed since start_time
-                time.sleep(60.0 - elapsed_time + 1)
+                time.sleep(60.0 - elapsed_time + 5)
                 start_time = time.perf_counter()
                 num_requests_sent_this_minute = 0 
-            elif elapsed_time >= 60.0 and num_requests_sent_this_minute >= self.max_requests_per_min:
-                # 
-                start_time += 60.0
-                num_requests_sent_this_minute -= self.max_requests_per_min
+            elif elapsed_time >= 60.0:
+                # If elapsed_time exceeds 60s, reset the time count and request count
+                start_time = time.perf_counter()
+                num_requests_sent_this_minute = 0
 
             responses[idx] = self.request(chunk) if request[idx] else 0
             num_requests_sent_this_minute += 1
