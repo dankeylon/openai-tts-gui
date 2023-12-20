@@ -266,13 +266,31 @@ class TTS_API_Wrapper():
         chunks, paths_filtered = zip(*[(chunk, path) for chunk, path in zip(self.book.chunks, paths_to_mp3s)
                                     if not (self.overwrite_protect and path.exists)])
 
-        # Send the chunks to OpenAI for processing, write responses to mp3s
-        audio_chunks = asyncio.run(self.spawn_requests(chunks))
-        self.write_mp3s(audio_chunks, paths_filtered)
+        # Send the chunks to OpenAI for processing, write responses to an mp3
+        responses = asyncio.run(self.spawn_requests(chunks))
+
+        # Combine the responses into an mp3 file.
+        # TODO: Might not work very well if only one mp3 file is created.
+        audio_chunks = []
+        for response in responses:
+            mp3 = b''
+            for data in response.iter_bytes(None):
+                mp3 += data
+            audio_chunks += [mp3]
+
+        mp3_list = [AudioSegment(data=chunk) for chunk in audio_chunks]
+        mp3_out = mp3_list[0]
+        for mp3 in mp3_list[1:]:
+            mp3_out += mp3
+
+        out_path = self.create_paths_to_mp3s(1)
+        mp3_out.export(out_path, format="mp3")
+        
+        # self.write_mp3s(audio_chunks, paths_filtered)
 
         # If more than 1 mp3 was created, will need to join the mp3s into a single file
-        if len(paths_to_mp3s) > 1 and not (self.overwrite_protect and self.create_paths_to_mp3s(1)[0].exists()):
-            self.join_mp3s(paths_to_mp3s)
+        #if len(paths_to_mp3s) > 1 and not (self.overwrite_protect and self.create_paths_to_mp3s(1)[0].exists()):
+        #    self.join_mp3s(paths_to_mp3s)
 
     def create_sample(self, chunk_selection: int = 1, sample_size: int = 1000):
         """Creates an audio sample for experimenting with different api options.
