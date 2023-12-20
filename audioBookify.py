@@ -202,8 +202,11 @@ class TTS_API_Wrapper():
         request_flags = [not (overwrite_protect and path.exists()) for path in paths_to_mp3s]
 
         # Once every 60 seconds, send out a maximum of self.max_requests_per_min requests to OpenAI
+        # With this async stuff, I could create all the coroutine objects up front, iterate through
+        # self.max_requests_per_min of them at a time, and then await those before sending out the next
+        # batch of requests after a minute has passed.
         async with aiohttp.ClientSession() as session:
-            responses = [0 for chunk in chunks]
+            requests = [0 for chunk in chunks]
             start_time = time.perf_counter()
             num_requests_sent_this_minute = 0
 
@@ -223,10 +226,10 @@ class TTS_API_Wrapper():
                     num_requests_sent_this_minute = 0
 
                 if request_flag:
-                    responses[idx] = await self.request(chunk)
+                    requests[idx] = self.request(chunk)
                     num_requests_sent_this_minute += 1
 
-        return responses
+            return await asyncio.gather(*requests)
     
     def write_mp3s(self, audio_chunks: list, paths_to_mp3s: list[Path], overwrite_protect: bool = True) -> None:
         # TODO: Should this be merged into spawn_requests? Could simplify code.
