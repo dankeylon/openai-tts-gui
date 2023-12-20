@@ -117,16 +117,14 @@ class TTS_API_Wrapper():
         """
 
         # TODO: Install some guardrails?  OpenAI will puke if it's not right anyway, so maybe doesn't matter.
-        assert load_dotenv('.env') 
+        assert load_dotenv('.env')
+        self.client = OpenAI() 
 
         self.book = book
         self.out_path = out_path
         self.model = model
         self.voice = voice
         self.overwrite_protect = overwrite_protect
-        # TODO: Should overwrite_protect be an argument to methods or use the class attribute?
-
-        self.client = OpenAI()
 
     def estimate_cost(self) -> float:        
         """Calculates a cost estimate for using the TTS api to generate an audiobook
@@ -167,8 +165,7 @@ class TTS_API_Wrapper():
         elif len_of_chunks_list == 1: 
             paths = [self.out_path / 
                     "mp3s" /
-                    (self.book.name + f"_{self.voice}_{self.model}_{tag}.mp3")
-                    for idx in range(0, len_of_chunks_list)]
+                    (self.book.name + f"_{self.voice}_{self.model}_{tag}.mp3")]
 
         return paths
 
@@ -185,17 +182,12 @@ class TTS_API_Wrapper():
 
         return self.client.audio.speech.create(model=self.model, voice=self.voice, input=chunk)
     
-    async def spawn_requests(self, chunks: list[str], paths_to_mp3s: list[Path], overwrite_protect: bool = True) -> list:
+    async def spawn_requests(self, chunks: list[str]) -> list:
         """Manages multiple requests to api such that user time is efficiently used and
         the api usage limits are not exceeded.
 
         Inputs
         chunks: A list containing each chunk of text to be sent
-        paths_to_mp3s: A list specifying where the final mp3s will be stored.  Used
-            to make sure already existing files are not overwritten if overwrite_protect
-            is True.
-        overwrite_protect: Signals whether or not to generate new mp3s even if that content
-            may already exist.  Useful for reducing api usage costs when testing.
 
         Outputs
         responses: A list containing all the binary streams sent by OpenAI to the user.  Contains
@@ -203,13 +195,8 @@ class TTS_API_Wrapper():
         
         """
         
-        # Don't make requests if a expected file already exists and in overwrite_protect mode
-        request_flags = [not (overwrite_protect and path.exists()) for path in paths_to_mp3s]
-
         async with aiohttp.ClientSession() as session:
-            # TODO: The 0 will lead to an error when asyncio.gather() is called since it's not a coroutine
-            requests = [self.request(chunk) if request else 0 
-                        for chunk, request in zip(chunks, request_flags)]
+            requests = [self.request(chunk) for chunk in chunks]
             responses = []
 
             # Once every 60 seconds, send out a maximum of self.max_requests_per_min requests to OpenAI
@@ -226,7 +213,7 @@ class TTS_API_Wrapper():
 
         return responses
     
-    def write_mp3s(self, audio_chunks: list, paths_to_mp3s: list[Path], overwrite_protect: bool = True) -> None:
+    def write_mp3s(self, audio_chunks: list, paths_to_mp3s: list[Path]) -> None:
         # TODO: Should this be merged into spawn_requests? Could simplify code.
         """Writes the binary audio responses to mp3 files while ensuring existing .mp3s are
         protected if desired.
@@ -234,26 +221,20 @@ class TTS_API_Wrapper():
         Inputs
         audio_chunks: A list containing the responses from OpenAI
         paths_to_mp3s: A list containing Path objects that tell the method where to save the .mp3 files to
-        overwrite_protect: Signals whether or not to save new mp3s even if that content
-            may already exist.
 
         """
 
         # Ensure that we don't mismatch audio_chunks to paths_to_mp3s
         assert len(audio_chunks) == len(paths_to_mp3s)
 
-        for idx, chunk in enumerate(audio_chunks):
-            if not (overwrite_protect and paths_to_mp3s[idx].exists()):
-                # TODO: A chunk might be zero, probably will be filtered out by the if statement
-                chunk.stream_to_file(paths_to_mp3s[idx])
+        for chunk, path in zip(audio_chunks, paths_to_mp3s):
+            chunk.stream_to_file(path)
 
-    def join_mp3s(self, mp3_path_list: list[Path], overwrite_protect: bool = True) -> None:
+    def join_mp3s(self, mp3_path_list: list[Path]) -> None:
         """Uses pydub to join the .mp3 chunks created by write_mp3s into a single mp3 file.
 
         Inputs
         mp3_path_list: A list containing Path objects that point to the .mp3 files the user wants to join
-        overwrite_protect: Signals whether or not to save new mp3s even if that content
-            may already exist.
 
         """
 
@@ -265,8 +246,7 @@ class TTS_API_Wrapper():
         
         # Export the full audiobook to a .mp3 file
         out_path = self.create_paths_to_mp3s(1)
-        if not (overwrite_protect and out_path.exists()):
-            output_file.export(out_path, format="mp3")
+        output_file.export(out_path, format="mp3")
     
     def create_audiobook(self) -> None:
         """Takes the book text provided at initialization and the provided settings and 
@@ -282,13 +262,17 @@ class TTS_API_Wrapper():
         # Predetermine the paths of output files in case overwrite_protect is True
         paths_to_mp3s = self.create_paths_to_mp3s(len(self.book.chunks))
 
+        # If overwrite_protect is True, filter out chunks and paths that point to already existing files
+        chunks, paths_filtered = zip(*[(chunk, path) for chunk, path in zip(self.book.chunks, paths_to_mp3s)
+                                    if not (self.overwrite_protect and path.exists)])
+
         # Send the chunks to OpenAI for processing, write responses to mp3s
-        audio_chunks = asyncio.run(self.spawn_requests(self.book.chunks, paths_to_mp3s, self.overwrite_protect))
-        self.write_mp3s(audio_chunks, paths_to_mp3s, self.overwrite_protect)
+        audio_chunks = asyncio.run(self.spawn_requests(chunks))
+        self.write_mp3s(audio_chunks, paths_filtered)
 
         # If more than 1 mp3 was created, will need to join the mp3s into a single file
-        if len(paths_to_mp3s) > 1:
-            self.join_mp3s(paths_to_mp3s, self.overwrite_protect)
+        if len(paths_to_mp3s) > 1 and not (self.overwrite_protect and self.create_paths_to_mp3s(1)[0].exists()):
+            self.join_mp3s(paths_to_mp3s)
 
     def create_sample(self, chunk_selection: int = 1, sample_size: int = 1000):
         """Creates an audio sample for experimenting with different api options.
@@ -311,8 +295,8 @@ class TTS_API_Wrapper():
 
         # Create the sample and write it to a .mp3
         path_to_sample = self.create_paths_to_mp3s(1, 'sample')
-        audio_chunk = asyncio.run(self.spawn_requests(sample, path_to_sample, self.overwrite_protect))
-        self.write_mp3s(audio_chunk, path_to_sample, self.overwrite_protect)
+        audio_chunk = asyncio.run(self.spawn_requests(sample))
+        self.write_mp3s(audio_chunk, path_to_sample)
 
 
 if __name__ == "__main__":
