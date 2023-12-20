@@ -17,6 +17,11 @@ from pathlib import Path
 from openai import OpenAI
 from pydub import AudioSegment
 
+def subslices(lst: list, n: int) -> list:
+    """Yield successive n-sized chunks from lst."""
+    for i in range(0, len(lst), n):
+        yield lst[i:i + n]
+
 class Book():
     """Object to store a .txt file in a format amenable to sending
     to the OpenAI TTS api.
@@ -201,35 +206,25 @@ class TTS_API_Wrapper():
         # Don't make requests if a expected file already exists and in overwrite_protect mode
         request_flags = [not (overwrite_protect and path.exists()) for path in paths_to_mp3s]
 
-        # Once every 60 seconds, send out a maximum of self.max_requests_per_min requests to OpenAI
-        # With this async stuff, I could create all the coroutine objects up front, iterate through
-        # self.max_requests_per_min of them at a time, and then await those before sending out the next
-        # batch of requests after a minute has passed.
         async with aiohttp.ClientSession() as session:
-            requests = [0 for chunk in chunks]
-            start_time = time.perf_counter()
-            num_requests_sent_this_minute = 0
+            # TODO: The 0 will lead to an error when asyncio.gather() is called since it's not a coroutine
+            requests = [self.request(chunk) if request else 0 
+                        for chunk, request in zip(chunks, request_flags)]
+            responses = []
 
-            for chunk, request_flag in zip(chunks, request_flags):
+            # Once every 60 seconds, send out a maximum of self.max_requests_per_min requests to OpenAI
+            for request_batch in subslices(requests, self.max_requests_per_min):
+                start_time = time.perf_counter()
+
+                responses += await asyncio.gather(*request_batch)
+
                 current_time = time.perf_counter()
                 elapsed_time = current_time - start_time
 
-                # Limit requests per minute
-                if elapsed_time < 60.0 and num_requests_sent_this_minute >= self.max_requests_per_min:
-                    # Hit api per minute usage limits, wait until one minute has passed since start_time
+                if elapsed_time <= 60.0:
                     time.sleep(60.0 - elapsed_time + 5)
-                    start_time = time.perf_counter()
-                    num_requests_sent_this_minute = 0 
-                elif elapsed_time >= 60.0:
-                    # If elapsed_time exceeds 60s, reset the time count and request count
-                    start_time = time.perf_counter()
-                    num_requests_sent_this_minute = 0
 
-                if request_flag:
-                    requests[idx] = self.request(chunk)
-                    num_requests_sent_this_minute += 1
-
-            return await asyncio.gather(*requests)
+        return responses
     
     def write_mp3s(self, audio_chunks: list, paths_to_mp3s: list[Path], overwrite_protect: bool = True) -> None:
         # TODO: Should this be merged into spawn_requests? Could simplify code.
@@ -288,7 +283,7 @@ class TTS_API_Wrapper():
         paths_to_mp3s = self.create_paths_to_mp3s(len(self.book.chunks))
 
         # Send the chunks to OpenAI for processing, write responses to mp3s
-        audio_chunks = self.spawn_requests(self.book.chunks, paths_to_mp3s, self.overwrite_protect)
+        audio_chunks = asyncio.run(self.spawn_requests(self.book.chunks, paths_to_mp3s, self.overwrite_protect))
         self.write_mp3s(audio_chunks, paths_to_mp3s, self.overwrite_protect)
 
         # If more than 1 mp3 was created, will need to join the mp3s into a single file
@@ -316,7 +311,7 @@ class TTS_API_Wrapper():
 
         # Create the sample and write it to a .mp3
         path_to_sample = self.create_paths_to_mp3s(1, 'sample')
-        audio_chunk = self.spawn_requests(sample, path_to_sample, self.overwrite_protect)
+        audio_chunk = asyncio.run(self.spawn_requests(sample, path_to_sample, self.overwrite_protect))
         self.write_mp3s(audio_chunk, path_to_sample, self.overwrite_protect)
 
 
