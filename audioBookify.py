@@ -11,11 +11,11 @@ import math
 import time
 import asyncio
 import aiohttp
+import pickle
 
 from dotenv import load_dotenv
 from pathlib import Path
 from openai import OpenAI
-from pydub import AudioSegment
 
 def subslices(lst: list, n: int) -> list:
     """Yield successive n-sized chunks from lst."""
@@ -116,7 +116,6 @@ class TTS_API_Wrapper():
         
         """
 
-        # TODO: Install some guardrails?  OpenAI will puke if it's not right anyway, so maybe doesn't matter.
         assert load_dotenv('.env')
         self.client = OpenAI() 
 
@@ -142,34 +141,21 @@ class TTS_API_Wrapper():
             
         return total_cost
     
-    def create_paths_to_mp3s(self, len_of_chunks_list: int, tag: str = '') -> list[Path]:
-        """Creates a list of Path objects that store the locations of potential .mp3
-        files.  Since OpenAI limits the number of characters in each request, multiple
-        .mp3 files will need to be generated for large text files.
+    def create_path_to_mp3(self, tag: str = '') -> Path:
+        """Creates a Path object that stores the location of a potential .mp3
+        file.
 
         Inputs
-        len_of_chunks_list: Integer that tells the method how many paths to generate
-        tag: Optional string to append to the file names
+        tag: Optional string to append to the file name
 
         Outputs
-        paths: List of Path objects
+        path: Path object
         
         """
-        # Create a list of paths to store .mp3s at.
-        # If more than one path is required, order them
-        if len_of_chunks_list > 1:
-            paths = [self.out_path / 
-                    "mp3s" /
-                    (self.book.name + f"_{self.voice}_{self.model}_{idx}_of_{len_of_chunks_list}_{tag}.mp3")
-                    for idx in range(0, len_of_chunks_list)]
-        elif len_of_chunks_list == 1: 
-            paths = [self.out_path / 
-                    "mp3s" /
-                    (self.book.name + f"_{self.voice}_{self.model}_{tag}.mp3")]
+        # Create a path to store .mp3s at. 
+        return self.out_path / "mp3s" / (self.book.name + f"_{self.voice}_{self.model}_{tag}.mp3")
 
-        return paths
-
-    async def request(self, chunk: str) -> HttpxBinaryResponseContent: # TODO:   Does this actually work? Or should I just leave the return type blank?
+    async def request(self, chunk: str):
         """Sends a request to the OpenAI api using settings defined in initialization.
 
         Inputs
@@ -213,64 +199,15 @@ class TTS_API_Wrapper():
 
         return responses
     
-    def write_mp3s(self, audio_chunks: list, paths_to_mp3s: list[Path]) -> None:
-        # TODO: Should this be merged into spawn_requests? Could simplify code.
-        """Writes the binary audio responses to mp3 files while ensuring existing .mp3s are
-        protected if desired.
+    def write_mp3(self, responses: list, out_path: Path) -> None:
+        """Writes the binary audio responses to an mp3 file
 
         Inputs
         audio_chunks: A list containing the responses from OpenAI
-        paths_to_mp3s: A list containing Path objects that tell the method where to save the .mp3 files to
-
+        out_path: Path object for file output destination
         """
 
-        # Ensure that we don't mismatch audio_chunks to paths_to_mp3s
-        assert len(audio_chunks) == len(paths_to_mp3s)
-
-        for chunk, path in zip(audio_chunks, paths_to_mp3s):
-            chunk.stream_to_file(path)
-
-    def join_mp3s(self, mp3_path_list: list[Path]) -> None:
-        """Uses pydub to join the .mp3 chunks created by write_mp3s into a single mp3 file.
-
-        Inputs
-        mp3_path_list: A list containing Path objects that point to the .mp3 files the user wants to join
-
-        """
-
-        # Load the mp3 files into AudioSegment objects and then combine them
-        mp3_list = [AudioSegment.from_mp3(file) for file in mp3_path_list]
-        output_file = mp3_list[0]
-        for file in mp3_list[1:]:
-            output_file = output_file + file
-        
-        # Export the full audiobook to a .mp3 file
-        out_path = self.create_paths_to_mp3s(1)
-        output_file.export(out_path, format="mp3")
-    
-    def create_audiobook(self) -> None:
-        """Takes the book text provided at initialization and the provided settings and 
-        converts it into an audiobook.
-        
-        """
-
-        # TODO: Look into joining the mp3s before they are written to a file, saves on hard drive space
-        # Using the AudioSegment __init__ method passing in data=audio_chunk.response.content(), might be able to merge before making files
-        # see: httpx/httpx/_models.py::Response
-        # openai-python/src/openai/_base_client.py::HttpxBinaryResponseContent
-
-        # Predetermine the paths of output files in case overwrite_protect is True
-        paths_to_mp3s = self.create_paths_to_mp3s(len(self.book.chunks))
-
-        # If overwrite_protect is True, filter out chunks and paths that point to already existing files
-        chunks, paths_filtered = zip(*[(chunk, path) for chunk, path in zip(self.book.chunks, paths_to_mp3s)
-                                    if not (self.overwrite_protect and path.exists)])
-
-        # Send the chunks to OpenAI for processing, write responses to an mp3
-        responses = asyncio.run(self.spawn_requests(chunks))
-
-        # Combine the responses into an mp3 file.
-        # TODO: Might not work very well if only one mp3 file is created.
+        # Combine the responses into a single byte array.
         audio_chunks = []
         for response in responses:
             mp3 = b''
@@ -278,19 +215,36 @@ class TTS_API_Wrapper():
                 mp3 += data
             audio_chunks += [mp3]
 
-        mp3_list = [AudioSegment(data=chunk) for chunk in audio_chunks]
-        mp3_out = mp3_list[0]
-        for mp3 in mp3_list[1:]:
-            mp3_out += mp3
+        mp3_out = b''.join(audio_chunks)
 
-        out_path = self.create_paths_to_mp3s(1)
-        mp3_out.export(out_path, format="mp3")
+        # Write byte array to an mp3 file
+        with open(out_path, 'wb') as f:
+            f.write(mp3_out)
+    
+    def create_audiobook(self, cache_responses: bool=False) -> None:
+        """Takes the book text provided at initialization and the provided settings and 
+        converts it into an audiobook.
+
+        Inputs
+        cache_responses: Flag to control caching responses in pickle file for debugging
         
-        # self.write_mp3s(audio_chunks, paths_filtered)
+        """
 
-        # If more than 1 mp3 was created, will need to join the mp3s into a single file
-        #if len(paths_to_mp3s) > 1 and not (self.overwrite_protect and self.create_paths_to_mp3s(1)[0].exists()):
-        #    self.join_mp3s(paths_to_mp3s)
+        assert not (self.create_path_to_mp3().exists() and self.overwrite_protect)
+
+        # Send the chunks to OpenAI for processing, write responses to an mp3
+        pickle_path = self.out_path / "responses.pickle"
+        if pickle_path.exists() and cache_responses:
+            with open(pickle_path, 'rb') as f:
+                responses = pickle.load(f)
+        elif not pickle_path.exists() and cache_responses:
+            responses = asyncio.run(self.spawn_requests(self.book.chunks))
+            with open(pickle_path, 'wb') as f:
+                pickle.dump(responses, f)
+        else:
+            responses = asyncio.run(self.spawn_requests(self.book.chunks))
+
+        self.write_mp3(responses, self.create_path_to_mp3())
 
     def create_sample(self, chunk_selection: int = 1, sample_size: int = 1000):
         """Creates an audio sample for experimenting with different api options.
@@ -312,9 +266,8 @@ class TTS_API_Wrapper():
         sample = [chunk[0:sample_size]]
 
         # Create the sample and write it to a .mp3
-        path_to_sample = self.create_paths_to_mp3s(1, 'sample')
         audio_chunk = asyncio.run(self.spawn_requests(sample))
-        self.write_mp3s(audio_chunk, path_to_sample)
+        self.write_mp3(audio_chunk, self.create_path_to_mp3('sample'))
 
 
 if __name__ == "__main__":
@@ -328,13 +281,18 @@ if __name__ == "__main__":
     print(f"Num Chars: {len(book.book_text)}")
     print(f"Num Tokens: {int(len(book.book_text)/1000) + 1}")
 
-    out_path = Path(__file__).parent / "mp3s"
+    out_path = Path(__file__).parent 
     api = TTS_API_Wrapper(book, out_path, model = "tts-1", voice = voice, overwrite_protect = True)
     print(f"Estimated Cost: {api.estimate_cost()}$")
 
-    go = input("Make audiobook? [y/n]")
-
+    go = input("Make Sample? [y/n]")
     if go == 'y':
-        asyncio.run(api.create_audiobook())
+        api.create_sample()
+
+    go = input("Make audiobook? [y/n]")
+    if go == 'y':
+        api.create_audiobook(cache_responses=True)
+
+
 
     
