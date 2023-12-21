@@ -7,8 +7,6 @@ Provides a GUI to interface with OpenAI's TTS api.
 
 ### Requirements
 - openai python library
-- pydub python library
-- joblib python library
 - dotenv python library
 
 ## Usage:
