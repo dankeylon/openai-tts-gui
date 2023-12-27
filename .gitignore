@@ -2,3 +2,4 @@
 responses.pickle
 books/*
 mp3s/*
+__pycache__/*
